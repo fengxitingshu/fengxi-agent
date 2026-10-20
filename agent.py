@@ -4,7 +4,7 @@
 
 启动:  python3 agent.py
 访问:  手机浏览器打开 http://电脑内网IP:8000 （与电脑同WiFi或经Tailscale）
-依赖:  pip3 install fastapi uvicorn requests   （缺哪个装哪个）
+依赖:  pip3 install fastapi uvicorn requests python-multipart   （缺哪个装哪个）
 功能:  1) 普通问答  2) 输出 bash 命令供手动执行  3) 手机上传文件/图片到电脑
 安全:  仅限内网使用, 不要把 8000 端口映射到公网; 每条命令执行前需手动点击确认
 """

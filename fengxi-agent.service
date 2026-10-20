@@ -1,0 +1,20 @@
+[Unit]
+Description=Fengxi Local Agent (手机指挥电脑)
+After=network-online.target ollama.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fengxi
+Group=fengxi
+WorkingDirectory=/home/fengxi
+ExecStart=/usr/bin/python3 /home/fengxi/agent.py
+Restart=always
+RestartSec=3
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/fengxi/.local/bin"
+Environment="PYTHONUNBUFFERED=1"
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

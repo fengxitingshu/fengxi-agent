@@ -10,6 +10,8 @@
 """
 import os
 import subprocess
+import threading
+import time
 
 import requests
 from fastapi import FastAPI, UploadFile, File
@@ -68,6 +70,74 @@ def api_run(b: RunIn):
         return {"output": "命令超时(120秒), 已终止", "code": -1}
     except Exception as e:
         return {"output": str(e), "code": -1}
+
+TASKS = {}
+
+class TaskIn(BaseModel):
+    task: str
+
+@app.post("/api/run_start")
+def api_run_start(b: RunIn):
+    tid = os.urandom(6).hex()
+    try:
+        p = subprocess.Popen(b.command, shell=True, cwd=CWD,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, errors="replace", start_new_session=True)
+    except Exception as e:
+        return {"error": str(e)}
+    buf = []
+    lock = threading.Lock()
+    def reader():
+        try:
+            for line in p.stdout:
+                with lock:
+                    buf.append(line)
+                    if len(buf) > 800:
+                        del buf[:300]
+        except Exception:
+            pass
+        try:
+            p.wait()
+        except Exception:
+            pass
+    threading.Thread(target=reader, daemon=True).start()
+    TASKS[tid] = {"p": p, "buf": buf, "lock": lock, "t0": time.time()}
+    now = time.time()
+    for k in [k for k, v in list(TASKS.items())
+              if v["p"].poll() is not None and now - v["t0"] > 3600]:
+        TASKS.pop(k, None)
+    return {"task": tid}
+
+@app.get("/api/run_poll")
+def api_run_poll(task: str):
+    t = TASKS.get(task)
+    if not t:
+        return {"done": True, "output": "", "code": -1}
+    code = t["p"].poll()
+    with t["lock"]:
+        out = "".join(t["buf"])[-16000:]
+    done = code is not None
+    if done:
+        TASKS.pop(task, None)
+    if not done and time.time() - t["t0"] > 3600:
+        try:
+            os.killpg(os.getpgid(t["p"].pid), 15)
+        except Exception:
+            pass
+    return {"done": done, "output": out, "code": code if code is not None else -1}
+
+@app.post("/api/run_stop")
+def api_run_stop(b: TaskIn):
+    t = TASKS.pop(b.task, None)
+    if t:
+        try:
+            os.killpg(os.getpgid(t["p"].pid), 15)
+        except Exception:
+            try:
+                t["p"].kill()
+            except Exception:
+                pass
+    return {"ok": True}
 
 @app.post("/api/upload")
 async def api_upload(file: UploadFile = File(...)):

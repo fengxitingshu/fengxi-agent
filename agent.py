@@ -10,6 +10,7 @@
 """
 import os
 import subprocess
+import shlex
 import threading
 import time
 
@@ -44,6 +45,7 @@ class ChatIn(BaseModel):
 
 class RunIn(BaseModel):
     command: str
+    sudo_pass: str = ""
 
 @app.post("/api/chat")
 def api_chat(b: ChatIn):
@@ -79,8 +81,12 @@ class TaskIn(BaseModel):
 @app.post("/api/run_start")
 def api_run_start(b: RunIn):
     tid = os.urandom(6).hex()
+    cmd = b.command
+    if b.sudo_pass and "sudo" in cmd:
+        pw = b.sudo_pass.replace("'", "'\\''")
+        cmd = "echo '" + pw + "' | sudo -S -p '' bash -c " + shlex.quote(b.command)
     try:
-        p = subprocess.Popen(b.command, shell=True, cwd=CWD,
+        p = subprocess.Popen(cmd, shell=True, cwd=CWD,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, errors="replace", start_new_session=True)
     except Exception as e:
@@ -162,8 +168,8 @@ def api_models():
 @app.get("/manifest.json")
 def manifest():
     return JSONResponse({
-        "name": "枫兮助手",
-        "short_name": "枫兮助手",
+        "name": "知枫语",
+        "short_name": "知枫语",
         "start_url": "/",
         "display": "standalone",
         "background_color": "#f5f6f8",

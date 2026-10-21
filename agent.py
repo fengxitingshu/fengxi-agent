@@ -50,8 +50,8 @@ def api_chat(b: ChatIn):
         r = requests.post(OLLAMA_URL, json={
             "model": b.model, "messages": msgs, "stream": False}, timeout=CHAT_TIMEOUT)
         d = r.json()
-        reply = (d.get("message") or {}).get("content", "")
-        return {"reply": reply}
+        msg = d.get("message") or {}
+        return {"reply": msg.get("content", ""), "thinking": msg.get("thinking", "")}
     except Exception as e:
         return {"error": "无法连接本地模型: %s" % e}
 
@@ -111,6 +111,14 @@ def icon():
            '<circle cx="190" cy="236" r="22" fill="#e8563f"/>'
            '<circle cx="256" cy="236" r="22" fill="#e8563f"/>'
            '<circle cx="322" cy="236" r="22" fill="#e8563f"/></svg>')
+    return Response(content=svg, media_type="image/svg+xml")
+
+@app.get("/avatar.svg")
+def avatar():
+    svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">'
+           '<rect width="512" height="512" rx="256" fill="#8a93a6"/>'
+           '<circle cx="256" cy="196" r="86" fill="#ffffff"/>'
+           '<path d="M104 452 C104 356 172 316 256 316 C340 316 408 356 408 452 Z" fill="#ffffff"/></svg>')
     return Response(content=svg, media_type="image/svg+xml")
 
 @app.get("/sw.js")
@@ -213,6 +221,25 @@ body.dark .cmd{background:#0a0a0f}
 .cmd-btns .run{background:#238636;color:#fff;font-weight:600}
 .cmd pre{padding:10px 12px;overflow-x:auto;color:#e6edf3;font-size:13px;line-height:1.55;font-family:ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap}
 .cmd-out{margin:8px 0 0;padding:9px 12px;background:#010409;border-radius:9px;color:#7ee787;font-size:12.5px;font-family:ui-monospace,Menlo,monospace;white-space:pre-wrap;max-height:220px;overflow:auto}
+/* 头像 */
+.msg{align-items:flex-start}
+.msg .av{width:32px;height:32px;border-radius:50%;flex-shrink:0;margin-right:8px;background:var(--panel)}
+.msg.user .av{margin-right:0;margin-left:8px}
+
+/* 思考过程 */
+.think{margin:2px 0 8px;border-left:3px solid var(--brand);padding:2px 0 2px 10px}
+.think-h{font-size:12.5px;color:var(--sub);cursor:pointer;user-select:none}
+.think-b{display:none;font-size:13px;color:var(--sub);white-space:pre-wrap;margin-top:6px;line-height:1.55;max-height:260px;overflow-y:auto}
+.think.open .think-b{display:block}
+
+/* 表情面板 */
+#inputbar{position:relative}
+#emojiBtn{border:none;background:none;font-size:22px;width:38px;height:42px;flex-shrink:0;cursor:pointer;color:var(--text);display:flex;align-items:center;justify-content:center}
+#emojiPanel{display:none;position:absolute;bottom:100%;left:8px;right:8px;background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:8px;box-shadow:0 -6px 24px rgba(0,0,0,.18);max-height:190px;overflow-y:auto;z-index:40}
+#emojiPanel.show{display:grid;grid-template-columns:repeat(8,1fr);gap:2px}
+#emojiPanel span{font-size:22px;text-align:center;padding:4px 0;cursor:pointer;border-radius:8px}
+#emojiPanel span:active{background:var(--panel2)}
+
 .typing{display:inline-flex;gap:5px;padding:14px 16px}
 .typing i{width:7px;height:7px;border-radius:50%;background:var(--sub);animation:bl 1.2s infinite}
 .typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
@@ -269,10 +296,12 @@ body.dark .cmd{background:#0a0a0f}
     </div>
     <div id="msgs"></div>
     <div id="inputbar">
+      <button id="emojiBtn" title="表情">😊</button>
       <button id="fileBtn" title="上传文件/图片">📎</button>
       <textarea id="inp" rows="1" placeholder="输入消息…"></textarea>
       <button id="sendBtn" title="发送">➤</button>
       <input type="file" id="fileInp" hidden>
+      <div id="emojiPanel"></div>
     </div>
   </main>
 </div>
@@ -360,6 +389,17 @@ function renderSide(){
   });
 }
 
+function bubbleHTML(m){
+  let inner = '';
+  if(m.role!=='user' && m.thinking){
+    inner += '<div class="think" onclick="this.classList.toggle(\'open\')">'+
+      '<div class="think-h">💭 思考过程（点击展开/收起）</div>'+
+      '<div class="think-b">'+esc(m.thinking)+'</div></div>';
+  }
+  inner += md(m.content);
+  return inner;
+}
+
 function renderMsgs(){
   const box = $('msgs'); box.innerHTML='';
   const s = curSess();
@@ -372,9 +412,18 @@ function renderMsgs(){
   }
   s.messages.forEach(m=>{
     const d = document.createElement('div');
-    if(m.role==='user'){ d.className='msg user'; d.innerHTML='<div class="bubble">'+md(m.content)+'</div>'; }
-    else if(m.role==='err'){ d.className='msg err'; d.innerHTML='<div class="bubble">'+esc(m.content)+'</div>'; }
-    else { d.className='msg ai'; d.innerHTML='<div class="bubble">'+md(m.content)+'</div>'; }
+    if(m.role==='user'){
+      d.className='msg user';
+      d.innerHTML='<div class="bubble">'+bubbleHTML(m)+'</div><img class="av" src="/avatar.svg" alt="">';
+    }
+    else if(m.role==='err'){
+      d.className='msg err';
+      d.innerHTML='<img class="av" src="/icon.svg" alt=""><div class="bubble">'+esc(m.content)+'</div>';
+    }
+    else{
+      d.className='msg ai';
+      d.innerHTML='<img class="av" src="/icon.svg" alt=""><div class="bubble">'+bubbleHTML(m)+'</div>';
+    }
     box.appendChild(d);
   });
   box.scrollTop = box.scrollHeight;
@@ -426,7 +475,7 @@ async function ask(s){
   catch(e){ r = {error: '请求失败或超时: '+e}; }
   hideTyping();
   if(r.reply !== undefined){
-    s.messages.push({role:'assistant', content:r.reply || '（模型返回空）'});
+    s.messages.push({role:'assistant', content:r.reply || '（模型返回空）', thinking:r.thinking||''});
   }else{
     s.messages.push({role:'err', content: r.error || '未知错误'});
   }
@@ -475,6 +524,23 @@ function toastUp(t){
   d.style.cssText='position:fixed;top:14px;left:50%;transform:translateX(-50%);background:var(--brand);color:#fff;padding:9px 16px;border-radius:20px;font-size:13px;z-index:99;box-shadow:0 4px 14px rgba(0,0,0,.25)';
   d.textContent=t; document.body.appendChild(d); setTimeout(()=>d.remove(),2500);
 }
+
+/* ================= 表情面板 ================= */
+const EMOJIS = ('😀 😄 😁 😆 😅 🤣 😊 🙂 😉 😍 🥰 😘 😜 🤪 🤔 🤨 😐 😴 😢 😭 😤 😡 🥺 😱 '+
+  '🤯 😎 🤩 🥳 🤗 🤫 👍 👎 👌 ✌️ 🤝 💪 👏 🙏 🫶 ❤️ 💔 💯 🔥 ⭐ 🎉 🎊 🍀 🌹 🍉 🍜 '+
+  '☕ 🍺 ⚽ 🏀 🎮 💻 📱 🚀 ✅ ❌ ❓ 💡 💰 🐶 🐱 🐼 🦊 🍁 🌙 ☀️ ⛅ 🌈 🎵 🍓 😇').split(' ');
+(function(){
+  const EP = $('emojiPanel');
+  EMOJIS.forEach(e=>{
+    const s = document.createElement('span'); s.textContent = e;
+    s.onclick = ()=>{ inp.value += e; inp.focus(); };
+    EP.appendChild(s);
+  });
+  $('emojiBtn').onclick = e=>{ e.stopPropagation(); EP.classList.toggle('show'); };
+  document.addEventListener('click', e=>{
+    if(EP.classList.contains('show') && !EP.contains(e.target)) EP.classList.remove('show');
+  });
+})();
 
 /* ================= 侧栏 / 输入 ================= */
 function openSide(){ $('side').classList.add('open'); $('mask').classList.add('show'); }

@@ -9,6 +9,8 @@
 安全:  仅限内网使用, 不要把 8000 端口映射到公网; 每条命令执行前需手动点击确认
 """
 import os
+import json
+import re
 import subprocess
 import shlex
 import threading
@@ -46,6 +48,35 @@ class ChatIn(BaseModel):
 class RunIn(BaseModel):
     command: str
     sudo_pass: str = ""
+
+SECRETS_FILE = os.path.join(CWD, ".fx-secrets.json")
+
+def load_secrets():
+    try:
+        with open(SECRETS_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+class SecretIn(BaseModel):
+    key: str
+    value: str
+
+@app.post("/api/secrets")
+def api_secrets(b: SecretIn):
+    k = re.sub(r"[^A-Z0-9_]", "", (b.key or "").upper())
+    if not k:
+        return {"ok": False, "error": "bad key"}
+    data = load_secrets()
+    if b.value:
+        data[k] = b.value
+        with open(SECRETS_FILE, "w") as f:
+            json.dump(data, f)
+        try:
+            os.chmod(SECRETS_FILE, 0o600)
+        except Exception:
+            pass
+    return {"ok": True, "keys": sorted(data.keys())}
 
 @app.post("/api/chat")
 def api_chat(b: ChatIn):
@@ -85,6 +116,8 @@ def api_run_start(b: RunIn):
     if b.sudo_pass and "sudo" in cmd:
         pw = b.sudo_pass.replace("'", "'\\''")
         cmd = "echo '" + pw + "' | sudo -S -p '' bash -c " + shlex.quote(b.command)
+    for k, v in load_secrets().items():
+        cmd = cmd.replace("{{" + k + "}}", v)
     try:
         p = subprocess.Popen(cmd, shell=True, cwd=CWD,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -107,7 +140,7 @@ def api_run_start(b: RunIn):
         except Exception:
             pass
     threading.Thread(target=reader, daemon=True).start()
-    TASKS[tid] = {"p": p, "buf": buf, "lock": lock, "t0": time.time()}
+    TASKS[tid] = {"p": p, "buf": buf, "lock": lock, "t0": time.time(), "cmd": b.command}
     now = time.time()
     for k in [k for k, v in list(TASKS.items())
               if v["p"].poll() is not None and now - v["t0"] > 3600]:
@@ -123,8 +156,6 @@ def api_run_poll(task: str):
     with t["lock"]:
         out = "".join(t["buf"])[-16000:]
     done = code is not None
-    if done:
-        TASKS.pop(task, None)
     if not done and time.time() - t["t0"] > 3600:
         try:
             os.killpg(os.getpgid(t["p"].pid), 15)
@@ -144,6 +175,27 @@ def api_run_stop(b: TaskIn):
             except Exception:
                 pass
     return {"ok": True}
+
+@app.get("/api/tasks")
+def api_tasks():
+    out = []
+    now = time.time()
+    for k, v in list(TASKS.items()):
+        code = v["p"].poll()
+        done = code is not None
+        with v["lock"]:
+            tail = "".join(v["buf"])[-300:]
+        out.append({
+            "task": k,
+            "cmd": v.get("cmd", ""),
+            "done": done,
+            "code": code if code is not None else -1,
+            "elapsed": int(now - v["t0"]),
+            "tail": tail,
+        })
+        if done and now - v["t0"] > 3600:
+            TASKS.pop(k, None)
+    return {"tasks": out}
 
 @app.post("/api/upload")
 async def api_upload(file: UploadFile = File(...)):

@@ -12,6 +12,13 @@ OLD_TAG="qwen3.5-9b"
 
 export PATH="$HOME/.local/bin:$PATH"
 
+# 0. 确保 modelscope 可用（没有就装，国内源）
+if ! command -v modelscope >/dev/null 2>&1; then
+  echo "== 安装 modelscope =="
+  pip3 install modelscope -i https://mirrors.aliyun.com/pypi/simple/
+  export PATH="$HOME/.local/bin:$PATH"
+fi
+
 # 1. 下载 + 导入（已导入则整体跳过，省时间）
 if ollama list 2>/dev/null | grep -q "$MODEL_TAG"; then
   echo "== 模型 $MODEL_TAG 已存在，跳过下载/导入 =="

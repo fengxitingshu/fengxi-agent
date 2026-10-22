@@ -50,6 +50,7 @@ class RunIn(BaseModel):
     sudo_pass: str = ""
 
 SECRETS_FILE = os.path.join(CWD, ".fx-secrets.json")
+MEMORY_FILE = os.path.join(CWD, ".fx-memory.txt")
 
 def load_secrets():
     try:
@@ -174,6 +175,51 @@ def api_run_stop(b: TaskIn):
                 t["p"].kill()
             except Exception:
                 pass
+    return {"ok": True}
+
+@app.get("/api/memory")
+def api_memory_get():
+    try:
+        with open(MEMORY_FILE) as f:
+            return {"memory": f.read().strip()}
+    except Exception:
+        return {"memory": ""}
+
+class MemIn(BaseModel):
+    text: str
+
+@app.post("/api/memory")
+def api_memory_post(b: MemIn):
+    text = (b.text or "").strip()
+    if not text:
+        return {"ok": False}
+    lines = []
+    try:
+        with open(MEMORY_FILE) as f:
+            lines = [l.strip() for l in f if l.strip()]
+    except Exception:
+        lines = []
+    lines = [l for l in lines if l != text]
+    lines.append(text)
+    if len(lines) > 60:
+        lines = lines[-60:]
+    with open(MEMORY_FILE, "w") as f:
+        f.write("\n".join(lines))
+    try:
+        os.chmod(MEMORY_FILE, 0o600)
+    except Exception:
+        pass
+    return {"ok": True, "count": len(lines)}
+
+class MemClearIn(BaseModel):
+    clear: bool = True
+
+@app.post("/api/memory_clear")
+def api_memory_clear(b: MemClearIn):
+    try:
+        os.remove(MEMORY_FILE)
+    except Exception:
+        pass
     return {"ok": True}
 
 @app.get("/api/tasks")

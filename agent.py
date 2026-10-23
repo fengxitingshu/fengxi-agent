@@ -21,10 +21,12 @@ from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import HTMLResponse, Response, JSONResponse
 from pydantic import BaseModel
 
-MODEL_DEFAULT = "qwen3.5-35b-a3b"
+MODEL_DEFAULT = os.environ.get("MODEL", "qwen3-coder:30b")
+# 说明: 默认用代码专精 MoE(qwen3-coder:30b, 30B/3.3B激活, ~19GB, 32G内存可跑, 256K上下文)。
+# 想退回原通用模型: 启动前设环境变量 MODEL=qwen3.5-35b-a3b
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434/api/chat")
 OLLAMA_TAGS = os.environ.get("OLLAMA_TAGS", "http://127.0.0.1:11434/api/tags")
-CHAT_TIMEOUT = 600            # 模型响应超时(秒), CPU推理35B较慢
+CHAT_TIMEOUT = 600            # 模型响应超时(秒), 本地CPU/MoE推理较慢
 CWD = "/home/fengxi"          # 命令执行的默认目录 / 上传落盘基准目录
 UPLOAD_DIR = os.path.join(CWD, "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -171,7 +173,7 @@ def api_chat_start(b: ChatIn):
         done_keys = [k for k, v in CHATS.items() if v["done"]]
         for k in done_keys[:-6]:
             CHATS.pop(k, None)
-    threading.Thread(target=_chat_worker, args=(tid, {"model": b.model, "messages": b.messages, "stream": True, "options": {"num_ctx": 8192}}), daemon=True).start()
+    threading.Thread(target=_chat_worker, args=(tid, {"model": b.model, "messages": b.messages, "stream": True, "options": {"num_ctx": 32768}}), daemon=True).start()
     return {"task": tid}
 
 @app.get("/api/chat_poll")
@@ -589,7 +591,7 @@ body.dark .cmd{background:#0a0a0f}
 /* ================= 状态 ================= */
 let sessions = JSON.parse(localStorage.getItem('fx_sessions')||'[]');
 let curId = localStorage.getItem('fx_cur')||null;
-let settings = Object.assign({theme:'light', model:'qwen3.5-35b-a3b'},
+let settings = Object.assign({theme:'light', model:'qwen3-coder:30b'},
   JSON.parse(localStorage.getItem('fx_settings')||'{}'));
 let sending = false, deferred = null;
 const $ = id => document.getElementById(id);

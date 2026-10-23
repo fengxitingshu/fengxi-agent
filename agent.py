@@ -173,7 +173,7 @@ def api_chat_start(b: ChatIn):
         done_keys = [k for k, v in CHATS.items() if v["done"]]
         for k in done_keys[:-6]:
             CHATS.pop(k, None)
-    threading.Thread(target=_chat_worker, args=(tid, {"model": b.model, "messages": b.messages, "stream": True, "options": {"num_ctx": 32768}}), daemon=True).start()
+    threading.Thread(target=_chat_worker, args=(tid, {"model": b.model, "messages": b.messages, "stream": True, "options": {"num_ctx": int(os.environ.get("NUM_CTX", "16384"))}}), daemon=True).start()
     return {"task": tid}
 
 @app.get("/api/chat_poll")

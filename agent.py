@@ -116,36 +116,50 @@ class ChatIn(BaseModel):
 def _chat_worker(tid, payload):
     ent = CHATS[tid]
     stats = {}
-    try:
-        r = requests.post(OLLAMA_URL, json=payload, stream=True, timeout=7200)
-        r.raise_for_status()
-        for line in r.iter_lines():
-            if ent.get("stop"):
-                break
-            if not line:
-                continue
-            try:
-                o = json.loads(line)
-            except Exception:
-                continue
-            m = o.get("message") or {}
-            if m.get("thinking") or m.get("content"):
-                with ent["lock"]:
-                    ent["th"] += m.get("thinking", "")
-                    ent["co"] += m.get("content", "")
-            if o.get("done"):
-                edur = o.get("eval_duration", 0) or 0
-                pout = o.get("eval_count", 0) or 0
-                stats = {"pin": o.get("prompt_eval_count", 0) or 0, "pout": pout,
-                         "tps": round(pout / (edur / 1e9), 1) if edur else 0}
-                break
+    err = ""
+    # 最多尝试 3 次: Ollama 生成流若中途被掐断(如内存压力), 自动重新生成
+    for attempt in range(3):
+        done_seen = False
+        try:
+            r = requests.post(OLLAMA_URL, json=payload, stream=True, timeout=7200)
+            r.raise_for_status()
+            for line in r.iter_lines():
+                if ent.get("stop"):
+                    break
+                if not line:
+                    continue
+                try:
+                    o = json.loads(line)
+                except Exception:
+                    continue
+                m = o.get("message") or {}
+                if m.get("thinking") or m.get("content"):
+                    with ent["lock"]:
+                        ent["th"] += m.get("thinking", "")
+                        ent["co"] += m.get("content", "")
+                if o.get("done"):
+                    done_seen = True
+                    edur = o.get("eval_duration", 0) or 0
+                    pout = o.get("eval_count", 0) or 0
+                    stats = {"pin": o.get("prompt_eval_count", 0) or 0, "pout": pout,
+                             "tps": round(pout / (edur / 1e9), 1) if edur else 0}
+                    break
+        except Exception as e:
+            err = str(e)
+        if ent.get("stop") or done_seen:
+            err = ""
+            break
+        # 流提前结束(未收到 done): 清空本轮内容, 稍候重试
+        err = err or ("Generation stream was interrupted prematurely (attempt " + str(attempt + 1) + "/3)")
         with ent["lock"]:
-            ent["done"] = True
-            ent["stats"] = stats
-    except Exception as e:
-        with ent["lock"]:
-            ent["done"] = True
-            ent["error"] = str(e)
+            ent["th"] = ""
+            ent["co"] = ""
+        time.sleep(3)
+    with ent["lock"]:
+        ent["done"] = True
+        ent["stats"] = stats
+        if not ent.get("stop") and err:
+            ent["error"] = err + "; please retry, the App will automatically retry on its own"
 
 @app.post("/api/chat_start")
 def api_chat_start(b: ChatIn):

@@ -32,7 +32,7 @@ UPLOAD_DIR = os.path.join(CWD, "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 def system_prompt() -> str:
-    ctx = os.environ.get("NUM_CTX", "16384")
+    ctx = os.environ.get("NUM_CTX", "8192")
     return (
         "你是运行在用户本地Ubuntu电脑上的助手，名字叫枫知语。"
         "当前模型: " + MODEL_DEFAULT + "，上下文窗口: " + ctx + " tokens。\n"

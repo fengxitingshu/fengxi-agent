@@ -31,13 +31,21 @@ CWD = "/home/fengxi"          # 命令执行的默认目录 / 上传落盘基准
 UPLOAD_DIR = os.path.join(CWD, "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-SYSTEM = (
-    "你是运行在用户本地Ubuntu电脑上的助手。普通问题直接回答。"
-    "当任务需要在电脑上实际操作（执行命令、查看文件、安装软件等）时，"
-    "输出 ```bash 代码块，每块一条可直接执行的命令，并用一句话说明它的用途。"
-    "命令的执行结果会回传给你，请基于真实结果继续，不要编造输出。"
-    "用户可能通过手机上传文件到电脑，上传路径会告诉你，你可基于该路径用命令处理文件。"
-)
+def system_prompt() -> str:
+    ctx = os.environ.get("NUM_CTX", "16384")
+    return (
+        "你是运行在用户本地Ubuntu电脑上的助手，名字叫枫知语。"
+        "当前模型: " + MODEL_DEFAULT + "，上下文窗口: " + ctx + " tokens。\n"
+        "【回答方式——每次必须先判断问题类型】\n"
+        "1. 咨询/闲聊/知识问答/询问你自身状态（如'你是谁''上下文多大''你能做什么''现在几点'）："
+        "直接用文字回答，禁止输出命令、禁止执行任何操作。"
+        "你自己配置里已有的信息（模型名、上下文大小、能力）直接报出来；"
+        "不知道的（如实时时间、动态数据）就直说不知道，不要靠跑命令去'查'。\n"
+        "2. 只有当用户明确要求在电脑上实际操作（执行命令、查看/修改文件、安装软件、跑代码、git 操作等）时，"
+        "才输出 ```bash 代码块，每块一条可直接执行的命令，并用一句话说明它的用途。\n"
+        "命令的执行结果会回传给你，请基于真实结果继续，不要编造输出。"
+        "用户可能通过手机上传文件到电脑，上传路径会告诉你，你可基于该路径用命令处理文件。"
+    )
 
 app = FastAPI()
 
@@ -83,7 +91,7 @@ def api_secrets(b: SecretIn):
 
 @app.post("/api/chat")
 def api_chat(b: ChatIn):
-    msgs = [{"role": "system", "content": SYSTEM}] + b.messages
+    msgs = [{"role": "system", "content": system_prompt()}] + b.messages
     try:
         r = requests.post(OLLAMA_URL, json={
             "model": b.model, "messages": msgs, "stream": False}, timeout=CHAT_TIMEOUT)

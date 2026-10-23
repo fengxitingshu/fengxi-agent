@@ -105,6 +105,77 @@ def api_run(b: RunIn):
     except Exception as e:
         return {"output": str(e), "code": -1}
 
+# ---------- 后台模型生成: App 关闭后电脑上继续跑 ----------
+CHATS = {}
+CHAT_LOCK = threading.Lock()
+
+class ChatIn(BaseModel):
+    model: str = ""
+    messages: list = []
+
+def _chat_worker(tid, payload):
+    ent = CHATS[tid]
+    stats = {}
+    try:
+        r = requests.post(OLLAMA_URL, json=payload, stream=True, timeout=7200)
+        r.raise_for_status()
+        for line in r.iter_lines():
+            if ent.get("stop"):
+                break
+            if not line:
+                continue
+            try:
+                o = json.loads(line)
+            except Exception:
+                continue
+            m = o.get("message") or {}
+            if m.get("thinking") or m.get("content"):
+                with ent["lock"]:
+                    ent["th"] += m.get("thinking", "")
+                    ent["co"] += m.get("content", "")
+            if o.get("done"):
+                edur = o.get("eval_duration", 0) or 0
+                pout = o.get("eval_count", 0) or 0
+                stats = {"pin": o.get("prompt_eval_count", 0) or 0, "pout": pout,
+                         "tps": round(pout / (edur / 1e9), 1) if edur else 0}
+                break
+        with ent["lock"]:
+            ent["done"] = True
+            ent["stats"] = stats
+    except Exception as e:
+        with ent["lock"]:
+            ent["done"] = True
+            ent["error"] = str(e)
+
+@app.post("/api/chat_start")
+def api_chat_start(b: ChatIn):
+    tid = os.urandom(6).hex()
+    with CHAT_LOCK:
+        CHATS[tid] = {"th": "", "co": "", "done": False, "error": "",
+                      "stats": None, "stop": False, "lock": threading.Lock()}
+        # 只保留最近 12 个生成任务
+        done_keys = [k for k, v in CHATS.items() if v["done"]]
+        for k in done_keys[:-6]:
+            CHATS.pop(k, None)
+    threading.Thread(target=_chat_worker, args=(tid, {"model": b.model, "messages": b.messages, "stream": True}), daemon=True).start()
+    return {"task": tid}
+
+@app.get("/api/chat_poll")
+def api_chat_poll(task: str):
+    ent = CHATS.get(task)
+    if not ent:
+        return {"error": "任务不存在(可能已被清理或服务重启)"}
+    with ent["lock"]:
+        return {"th": ent["th"], "co": ent["co"], "done": ent["done"],
+                "error": ent["error"], "stats": ent["stats"]}
+
+@app.post("/api/chat_stop")
+def api_chat_stop(b: dict):
+    ent = CHATS.get(b.get("task", ""))
+    if ent:
+        ent["stop"] = True
+    return {"ok": True}
+
 TASKS = {}
 
 class TaskIn(BaseModel):

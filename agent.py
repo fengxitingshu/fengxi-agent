@@ -212,8 +212,12 @@ def api_run_start(b: RunIn):
     if b.sudo_pass and "sudo" in cmd:
         pw = b.sudo_pass.replace("'", "'\\''")
         cmd = "echo '" + pw + "' | sudo -S -p '' bash -c " + shlex.quote(b.command)
-    for k, v in load_secrets().items():
-        cmd = cmd.replace("{{" + k + "}}", v)
+    _norm = lambda s: s.strip().lower().replace("-", "_").replace(" ", "_")
+    _smap = {_norm(k): v for k, v in load_secrets().items()}
+    def _secret_repl(m):
+        key = _norm(m.group(1))
+        return _smap[key] if key in _smap else m.group(0)
+    cmd = re.sub(r"\{\{\s*([^}]*?)\s*\}\}", _secret_repl, cmd)
     try:
         p = subprocess.Popen(cmd, shell=True, cwd=CWD,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
